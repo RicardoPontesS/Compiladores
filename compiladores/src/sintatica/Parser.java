@@ -4,8 +4,10 @@ import lexical.LexicalAnalyzer;
 import lexical.Token;
 import lexical.TokenType;
 
-import java.util.List;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
+import java.util.List;
 
 public class Parser {
     private List<Token> tokens;
@@ -15,199 +17,198 @@ public class Parser {
         this.tokens = tokens;
     }
 
-    public TreeNode parseProgram() {
-        TreeNode root = new TreeNode("Programa");
-
+    public void parseProgram() {
         while (currentTokenIndex < tokens.size()) {
-            Token token = peek();
-
-            if (token.getType() == TokenType.KEYWORD &&
-                (token.getValue().equals("void") || token.getValue().equals("int") || token.getValue().equals("bool"))) {
-                if (isFunctionDeclaration()) {
-                    root.addChild(parseFunction());
-                } else {
-                    root.addChild(parseDeclaration());
-                }
-            } else {
-                throw new RuntimeException("Erro: Token inesperado fora de uma função ou declaração: " + token);
-            }
+            declaracao();
         }
-
-        return root;
     }
 
-    private TreeNode parseFunction() {
-        TreeNode functionNode = new TreeNode("Função");
-
-        // Declaração da função
-        functionNode.addChild(parseDeclaration());
-
-        // Espera abertura do bloco '{'
-        Token token = consume();
-        if (token.getType() != TokenType.SYMBOL || !token.getValue().equals("{")) {
-            throw new RuntimeException("Erro: '{' esperado após declaração da função, encontrado: " + token);
+    private void declaracao() {
+        if (isFunctionDeclaration()) {
+            parseFunction();
+        } else if (isVariableDeclaration()) {
+            parseVariableDeclaration();
+        } else {
+            throw new RuntimeException("Erro: Token inesperado fora de uma declaração: " + peek());
         }
-        functionNode.addChild(new TreeNode("{"));
-
-        // Processa declarações ou comandos dentro do bloco
-        while (peek().getType() != TokenType.SYMBOL || !peek().getValue().equals("}")) {
-            if (isDeclaration()) {
-                functionNode.addChild(parseDeclaration());
-            } else {
-                functionNode.addChild(parseCommand());
-            }
-        }
-
-        // Espera fechamento do bloco '}'
-        token = consume();
-        if (token.getType() != TokenType.SYMBOL || !token.getValue().equals("}")) {
-            throw new RuntimeException("Erro: '}' esperado no final do bloco da função, encontrado: " + token);
-        }
-        functionNode.addChild(new TreeNode("}"));
-
-        return functionNode;
     }
 
-    private boolean isDeclaration() {
-        if (currentTokenIndex < tokens.size()) {
-            Token token = tokens.get(currentTokenIndex);
-            return token.getType() == TokenType.KEYWORD &&
-                   (token.getValue().equals("void") || token.getValue().equals("int") || token.getValue().equals("bool"));
+    private void parseFunction() {
+        parseFunctionDeclaration();
+
+        accept(TokenType.SYMBOL); // '{'
+
+        while (isDeclaration()) {
+            declaracao();
         }
-        return false;
+
+        while (!peek().getType().equals(TokenType.SYMBOL) || !peek().getValue().equals("}")) {
+            parseCommand();
+        }
+
+        accept(TokenType.SYMBOL); // '}'
     }
 
+    private void parseFunctionDeclaration() {
+        tipo();
+        accept(TokenType.IDENTIFIER);
+        accept(TokenType.SYMBOL); // '('
+        // Lógica para análise de parâmetros pode ser adicionada aqui, se necessário
+        accept(TokenType.SYMBOL); // ')'
+    }
 
-    private TreeNode parseDeclaration() {
-        TreeNode declarationNode = new TreeNode("Declaração");
-
-        // Tipo
-        Token token = consume();
-        if (token.getType() != TokenType.KEYWORD || !(token.getValue().equals("void") || token.getValue().equals("int") || token.getValue().equals("bool"))) {
-            throw new RuntimeException("Erro: Tipo esperado, encontrado: " + token);
-        }
-        declarationNode.addChild(new TreeNode(token.getValue()));
-
-        // Identificador
-        token = consume();
-        if (token.getType() != TokenType.IDENTIFIER) {
-            throw new RuntimeException("Erro: Identificador esperado, encontrado: " + token);
-        }
-        declarationNode.addChild(new TreeNode(token.getValue()));
-
-        // Verifica se é uma função
-        if (peek().getType() == TokenType.SYMBOL && peek().getValue().equals("(")) {
-            consume(); // Consome '('
-            if (peek().getType() == TokenType.SYMBOL && peek().getValue().equals(")")) {
-                consume(); // Consome ')'
-                declarationNode.addChild(new TreeNode("Função"));
-                return declarationNode;
-            } else {
-                throw new RuntimeException("Erro: ')' esperado após '(', encontrado: " + peek());
-            }
-        }
-
-        // Declaração de variáveis (vírgulas opcionais)
+    private void parseVariableDeclaration() {
+        tipo();
+        accept(TokenType.IDENTIFIER);
         while (peek().getType() == TokenType.SYMBOL && peek().getValue().equals(",")) {
-            consume(); // Consome ','
-            token = consume(); // Consome próximo identificador
-            if (token.getType() != TokenType.IDENTIFIER) {
-                throw new RuntimeException("Erro: Identificador esperado após ',', encontrado: " + token);
-            }
-            declarationNode.addChild(new TreeNode(token.getValue()));
+            consume();
+            accept(TokenType.IDENTIFIER);
         }
 
-        // ';'
-        token = consume();
-        if (token.getType() != TokenType.SYMBOL || !token.getValue().equals(";")) {
-            throw new RuntimeException("Erro: ';' esperado, encontrado: " + token);
+        if (peek().getType() == TokenType.SYMBOL && peek().getValue().equals("[")) {
+            consume();
+            accept(TokenType.CONSTANT);
+            accept(TokenType.SYMBOL); // ']'
         }
 
-        return declarationNode;
+        accept(TokenType.SYMBOL); // ';'
     }
 
-    private TreeNode parseCommand() {
-        TreeNode commandNode = new TreeNode("Comando");
+    private void parseCommand() {
         Token token = peek();
 
-        if (token.getType() == TokenType.KEYWORD && token.getValue().equals("while")) {
-            consume(); // Consome 'while'
-            commandNode.addChild(new TreeNode("while"));
-
-            // '('
-            token = consume();
-            if (token.getType() != TokenType.SYMBOL || !token.getValue().equals("(")) {
-                throw new RuntimeException("Erro: '(' esperado, encontrado: " + token);
+        switch (token.getType()) {
+            case IDENTIFIER -> parseExpressionCommand();
+            case KEYWORD -> {
+                switch (token.getValue()) {
+                    case "if" -> parseIfCommand();
+                    case "while" -> parseWhileCommand();
+                    case "return" -> parseReturnCommand();
+                    default -> throw new RuntimeException("Erro: Comando inválido: " + token);
+                }
             }
-
-            // Expressão
-            commandNode.addChild(parseExpression());
-
-            // ')'
-            token = consume();
-            if (token.getType() != TokenType.SYMBOL || !token.getValue().equals(")")) {
-                throw new RuntimeException("Erro: ')' esperado, encontrado: " + token);
+            case SYMBOL -> {
+                if (token.getValue().equals("{")) {
+                    parseCompoundCommand();
+                } else {
+                    throw new RuntimeException("Erro: Comando inválido: " + token);
+                }
             }
-
-            // Comando
-            commandNode.addChild(parseCommand());
-        } else if (token.getType() == TokenType.IDENTIFIER) {
-            consume(); // Consome identificador
-            commandNode.addChild(new TreeNode(token.getValue()));
-
-            // '='
-            token = consume();
-            if (token.getType() != TokenType.OPERATOR || !token.getValue().equals("=")) {
-                throw new RuntimeException("Erro: '=' esperado, encontrado: " + token);
-            }
-
-            // Expressão
-            commandNode.addChild(parseExpression());
-
-            // ';'
-            token = consume();
-            if (token.getType() != TokenType.SYMBOL || !token.getValue().equals(";")) {
-                throw new RuntimeException("Erro: ';' esperado, encontrado: " + token);
-            }
-        } else if (token.getType() == TokenType.SYMBOL && token.getValue().equals("{")) {
-            consume(); // Consome '{'
-            commandNode.addChild(new TreeNode("{"));
-
-            while (peek().getType() != TokenType.SYMBOL || !peek().getValue().equals("}")) {
-                commandNode.addChild(parseCommand());
-            }
-
-            // '}'
-            token = consume();
-            if (token.getType() != TokenType.SYMBOL || !token.getValue().equals("}")) {
-                throw new RuntimeException("Erro: '}' esperado, encontrado: " + token);
-            }
-            commandNode.addChild(new TreeNode("}"));
-        } else {
-            throw new RuntimeException("Erro: Comando inválido: " + token);
+            default -> throw new RuntimeException("Erro: Comando inesperado: " + token);
         }
-
-        return commandNode;
     }
 
+    private void parseExpressionCommand() {
+        parseExpression();
+        accept(TokenType.SYMBOL); // ';'
+    }
 
-    private TreeNode parseExpression() {
-        TreeNode expressionNode = new TreeNode("Expressão");
-        Token token = consume();
-
-        if (token.getType() == TokenType.IDENTIFIER || token.getType() == TokenType.CONSTANT) {
-            expressionNode.addChild(new TreeNode(token.getValue()));
-
-            if (peek().getType() == TokenType.OPERATOR) {
-                token = consume();
-                expressionNode.addChild(new TreeNode(token.getValue()));
-                expressionNode.addChild(parseExpression());
-            }
-        } else {
-            throw new RuntimeException("Erro: Expressão inválida: " + token);
+    private void parseIfCommand() {
+        accept(TokenType.KEYWORD); // "if"
+        accept(TokenType.SYMBOL); // '('
+        parseExpression();
+        accept(TokenType.SYMBOL); // ')'
+        parseCommand();
+        if (peek().getType() == TokenType.KEYWORD && peek().getValue().equals("else")) {
+            consume();
+            parseCommand();
         }
+    }
 
-        return expressionNode;
+    private void parseWhileCommand() {
+        accept(TokenType.KEYWORD); // "while"
+        accept(TokenType.SYMBOL); // '('
+        parseExpression();
+        accept(TokenType.SYMBOL); // ')'
+        parseCommand();
+    }
+
+    private void parseReturnCommand() {
+        accept(TokenType.KEYWORD); // "return"
+        if (peek().getType() != TokenType.SYMBOL || !peek().getValue().equals(";")) {
+            parseExpression();
+        }
+        accept(TokenType.SYMBOL); // ';'
+    }
+
+    private void parseCompoundCommand() {
+        accept(TokenType.SYMBOL); // '{'
+        while (!peek().getType().equals(TokenType.SYMBOL) || !peek().getValue().equals("}")) {
+            parseCommand();
+        }
+        accept(TokenType.SYMBOL); // '}'
+    }
+
+    private void parseExpression() {
+        parseAssignmentExpression();
+    }
+
+    private void parseAssignmentExpression() {
+        parseSimpleExpression();
+        if (peek().getType() == TokenType.OPERATOR && peek().getValue().equals("=")) {
+            consume(); // consome '='
+            parseAssignmentExpression();
+        } else if (isRelationalOperator(peek())) {
+            consume(); // consome operador relacional
+            parseSimpleExpression();
+        }
+    }
+
+    private void parseSimpleExpression() {
+        parseTerm();
+        while (peek().getType() == TokenType.OPERATOR &&
+                (peek().getValue().equals("+") || peek().getValue().equals("-"))) {
+            consume();
+            parseTerm();
+        }
+    }
+
+    private void parseTerm() {
+        parseFactor();
+        while (peek().getType() == TokenType.OPERATOR &&
+                (peek().getValue().equals("*") || peek().getValue().equals("/"))) {
+            consume();
+            parseFactor();
+        }
+    }
+
+    private void parseFactor() {
+        Token token = peek();
+        switch (token.getType()) {
+            case CONSTANT, IDENTIFIER -> consume();
+            case SYMBOL -> {
+                if (token.getValue().equals("(")) {
+                    consume();
+                    parseExpression();
+                    accept(TokenType.SYMBOL); // ')'
+                } else {
+                    throw new RuntimeException("Erro: Fator inesperado: " + token);
+                }
+            }
+            default -> throw new RuntimeException("Erro: Fator inesperado: " + token);
+        }
+    }
+
+    private boolean isRelationalOperator(Token token) {
+        return token.getType() == TokenType.OPERATOR && (
+                token.getValue().equals("<") || token.getValue().equals("<=") ||
+                token.getValue().equals(">") || token.getValue().equals(">=") ||
+                token.getValue().equals("==") || token.getValue().equals("!="));
+    }
+
+    private void tipo() {
+        Token token = consume();
+        if (token.getType() != TokenType.KEYWORD ||
+                !(token.getValue().equals("int") || token.getValue().equals("void") || token.getValue().equals("bool"))) {
+            throw new RuntimeException("Erro: Tipo esperado, encontrado: " + token);
+        }
+    }
+
+    private void accept(TokenType expected) {
+        Token token = consume();
+        if (token.getType() != expected) {
+            throw new RuntimeException("Erro: Esperado " + expected + ", encontrado: " + token);
+        }
     }
 
     private Token consume() {
@@ -224,16 +225,33 @@ public class Parser {
         return tokens.get(currentTokenIndex);
     }
 
+    private boolean isDeclaration() {
+        return isFunctionDeclaration() || isVariableDeclaration();
+    }
+
     private boolean isFunctionDeclaration() {
         if (currentTokenIndex + 2 < tokens.size()) {
+            Token typeToken = tokens.get(currentTokenIndex);
             Token identifierToken = tokens.get(currentTokenIndex + 1);
             Token nextToken = tokens.get(currentTokenIndex + 2);
-            return identifierToken.getType() == TokenType.IDENTIFIER &&
-                   nextToken.getType() == TokenType.SYMBOL && nextToken.getValue().equals("(");
+            return typeToken.getType() == TokenType.KEYWORD &&
+                    (typeToken.getValue().equals("int") || typeToken.getValue().equals("void") || typeToken.getValue().equals("bool")) &&
+                    identifierToken.getType() == TokenType.IDENTIFIER &&
+                    nextToken.getType() == TokenType.SYMBOL && nextToken.getValue().equals("(");
         }
         return false;
     }
 
+    private boolean isVariableDeclaration() {
+        if (currentTokenIndex + 1 < tokens.size()) {
+            Token typeToken = tokens.get(currentTokenIndex);
+            Token identifierToken = tokens.get(currentTokenIndex + 1);
+            return typeToken.getType() == TokenType.KEYWORD &&
+                    (typeToken.getValue().equals("int") || typeToken.getValue().equals("void") || typeToken.getValue().equals("bool")) &&
+                    identifierToken.getType() == TokenType.IDENTIFIER;
+        }
+        return false;
+    }
 
     public static void main(String[] args) {
         try {
@@ -242,21 +260,21 @@ public class Parser {
                 "src/lexical/keywords.txt"
             );
 
-            String code = """
-                void p() {
-                    int a1, b, ccc;
-                    bool e, d;
-                    while (e > 100)
-                        a1 = b * ccc;
+            String inputFilePath = "src/lexical/input.txt";
+            StringBuilder code = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new FileReader(inputFilePath))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    code.append(line).append("\n");
                 }
-            """;
+            }
 
-            List<Token> tokens = lexer.analyze(code);
+            List<Token> tokens = lexer.analyze(code.toString());
 
             Parser parser = new Parser(tokens);
-            TreeNode tree = parser.parseProgram();
+            parser.parseProgram();
 
-            System.out.println(tree);
+            System.out.println("Análise concluída com sucesso!");
         } catch (IOException e) {
             System.err.println("Erro ao carregar arquivos: " + e.getMessage());
         } catch (RuntimeException e) {
