@@ -31,6 +31,17 @@ public class LexicalAnalyzer {
         return data;
     }
 
+    public String loadInputFile(String filePath) throws IOException {
+        StringBuilder code = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                code.append(line).append("\n");
+            }
+        }
+        return code.toString();
+    }
+
     public List<Token> analyze(String input) {
         List<Token> tokens = new ArrayList<>();
         int index = 0;
@@ -97,14 +108,9 @@ public class LexicalAnalyzer {
                 "src/lexical/keywords.txt"
             );
 
-            String code = """
-                void p() {
-                    int a1, b, ccc;
-                    bool e, d;
-                    while (e > 100)
-                        a1 = b * ccc;
-                }
-            """;
+
+            String inputFilePath = "src/lexical/input.txt";
+            String code = analyzer.loadInputFile(inputFilePath);
 
             List<Token> tokens = analyzer.analyze(code);
 
